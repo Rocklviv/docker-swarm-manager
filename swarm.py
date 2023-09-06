@@ -8,6 +8,7 @@ import requests
 import azure.core.exceptions
 from azure.storage.blob import BlobServiceClient
 from logging import StreamHandler, Formatter
+from abc import ABC, abstractmethod
 
 
 class LogHandler(StreamHandler):
@@ -101,6 +102,7 @@ class Discovery(BlobStorage):
         self.leader_file = "cluster/leader"
         self.list_managers = "cluster/managers"
 
+    @abstractmethod
     def set_lock(self, ip: str) -> None:
         """Sets lock file in blob storage.
         Lock file used to secure
@@ -111,6 +113,7 @@ class Discovery(BlobStorage):
         self.log.info(f"Set lock by {ip} request")
         self.put_object(self.lock_file, ip)
 
+    @abstractmethod
     def state_exists(self) -> bool:
         """Simple check if lock file exists
 
@@ -121,6 +124,7 @@ class Discovery(BlobStorage):
             return True
         return False
 
+    @abstractmethod
     def set_leader(self, ip: str, token: str) -> None:
         """Sets leader data
 
@@ -131,6 +135,7 @@ class Discovery(BlobStorage):
         data = {"ip": ip, "token": token}
         self.put_object(self.leader_file, json.dumps(data))
 
+    @abstractmethod
     def get_leader(self) -> object:
         """Gets leader data
 
@@ -143,14 +148,17 @@ class Discovery(BlobStorage):
             return js
         except azure.core.exceptions.ResourceNotFoundError as exc:
             self.log.error(exc)
-            return {}
+            return None
 
+    @abstractmethod
     def get_managers(self) -> None:
         raise NotImplementedError()
 
+    @abstractmethod
     def remove_lock(self) -> None:
         raise NotImplementedError()
 
+    @abstractmethod
     def register(self, ip: str) -> None:
         raise NotImplementedError()
 
@@ -233,7 +241,7 @@ class Manager(DockerSwarm):
             return False
         except docker.errors.APIError as exc:
             self.log.critical(exc)
-            return
+            return False
 
     def update_state(self) -> None:
         raise NotImplementedError()
@@ -256,7 +264,7 @@ class Manager(DockerSwarm):
         except docker.errors.APIError as exc:
             self.log.critical("Failed to get join token")
             self.log.critical(exc)
-            return
+            return None
 
     def _check_address(self) -> None:
         raise NotImplementedError()
