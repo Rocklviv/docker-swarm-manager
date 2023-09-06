@@ -128,9 +128,7 @@ class Discovery(BlobStorage):
             ip (str): IP address
             token (str): Manager join token
         """
-        data = {}
-        data["ip"] = ip
-        data["token"] = token
+        data = {"ip": ip, "token": token}
         self.put_object(self.leader_file, json.dumps(data))
 
     def get_leader(self) -> object:
@@ -148,13 +146,13 @@ class Discovery(BlobStorage):
             return {}
 
     def get_managers(self) -> None:
-        pass
+        raise NotImplementedError()
 
     def remove_lock(self) -> None:
-        pass
+        raise NotImplementedError()
 
     def register(self, ip: str) -> None:
-        pass
+        raise NotImplementedError()
 
 
 class DockerSwarm(Discovery):
@@ -238,10 +236,10 @@ class Manager(DockerSwarm):
             return
 
     def update_state(self) -> None:
-        pass
+        raise NotImplementedError()
 
     def join_manager(self) -> None:
-        pass
+        raise NotImplementedError()
 
     def _get_token(self) -> str:
         """Gets Docker Swarm Join token for manager
@@ -249,6 +247,7 @@ class Manager(DockerSwarm):
         Returns:
             str: join token
         """
+        res = None
         try:
             res = self.docker_client.api.inspect_swarm()
             manager_join_token = res.get("JoinTokens").get("Manager")
@@ -260,7 +259,7 @@ class Manager(DockerSwarm):
             return
 
     def _check_address(self) -> None:
-        pass
+        raise NotImplementedError()
 
 
 class Worker(DockerSwarm):
