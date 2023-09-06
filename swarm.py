@@ -4,8 +4,7 @@ import docker
 import logging
 import urllib3
 import requests
-from azure.identity import DefaultAzureCredential
-from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+from azure.storage.blob import BlobServiceClient
 from logging import StreamHandler, Formatter
 
 
@@ -17,11 +16,11 @@ class LogHandler(StreamHandler):
     """
 
     def __init__(self) -> None:
-        type = os.getenv("LOGGING_TYPE") or sys.stdout
-        StreamHandler.__init__(self, type)
-        format = "%(asctime)s [%(threadName)10s][%(module)10s][%(lineno)4s][%(levelname)8s] %(message)s"
+        output_type = os.getenv("LOGGING_TYPE") or sys.stdout
+        StreamHandler.__init__(self, output_type)
+        output_format = "%(asctime)s [%(threadName)10s][%(module)10s][%(lineno)4s][%(levelname)8s] %(message)s"
         format_date = "%Y-%m-%dT%H:%M:%S%Z"
-        formatter = Formatter(format, format_date)
+        formatter = Formatter(output_format, format_date)
         self.setFormatter(formatter)
 
 
