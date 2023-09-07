@@ -8,7 +8,6 @@ import requests
 import azure.core.exceptions
 from azure.storage.blob import BlobServiceClient
 from logging import StreamHandler, Formatter
-from abc import ABC, abstractmethod
 
 
 class LogHandler(StreamHandler):
@@ -21,14 +20,16 @@ class LogHandler(StreamHandler):
     def __init__(self) -> None:
         output_type = os.getenv("LOGGING_TYPE") or sys.stdout
         StreamHandler.__init__(self, output_type)
-        output_format = "%(asctime)s [%(threadName)10s][%(module)10s][%(lineno)4s][%(levelname)8s] %(message)s"
+        output_format = "%(asctime)s [%(threadName)10s][%(module)10s][%(lineno)4s]\
+        [%(levelname)8s] %(message)s"
         format_date = "%Y-%m-%dT%H:%M:%S%Z"
         formatter = Formatter(output_format, format_date)
         self.setFormatter(formatter)
 
 
 class BlobStorage:
-    """BlobStorage class provides an interface to communicate with Azure to get, put, delete blobs from Azure Blob Storage Container"""
+    """BlobStorage class provides an interface to communicate with Azure to get,
+    put, delete blobs from Azure Blob Storage Container"""
 
     def __init__(self) -> None:
         # Azure Blob Storage related init
@@ -91,8 +92,30 @@ class BlobStorage:
         )
         blob_client.delete_blob()
 
+    def list_objects(self, path: str) -> list:
+        """Returns liss of blob objects based on name prefix
+
+        Args:
+            path (str): Blob path or name prefix
+
+        Returns:
+            list: List of blob objects
+        """
+        blob_client = self.blob_svc_client.get_container_client(
+            container=self.container_name
+        )
+        list_objects = blob_client.list_blobs(path)
+        return list_objects
+
 
 class Discovery(BlobStorage):
+    """Discovery class controls discovery process to set cluster leader and
+    register nodes
+
+    Args:
+        BlobStorage (class): BlobStorage class
+    """
+
     def __init__(self) -> None:
         super().__init__()
         self.log = logging.getLogger("Discovery")
@@ -102,7 +125,6 @@ class Discovery(BlobStorage):
         self.leader_file = "cluster/leader"
         self.list_managers = "cluster/managers"
 
-    @abstractmethod
     def set_lock(self, ip: str) -> None:
         """Sets lock file in blob storage.
         Lock file used to secure
@@ -113,7 +135,6 @@ class Discovery(BlobStorage):
         self.log.info(f"Set lock by {ip} request")
         self.put_object(self.lock_file, ip)
 
-    @abstractmethod
     def state_exists(self) -> bool:
         """Simple check if lock file exists
 
@@ -124,7 +145,6 @@ class Discovery(BlobStorage):
             return True
         return False
 
-    @abstractmethod
     def set_leader(self, ip: str, token: str) -> None:
         """Sets leader data
 
@@ -135,7 +155,6 @@ class Discovery(BlobStorage):
         data = {"ip": ip, "token": token}
         self.put_object(self.leader_file, json.dumps(data))
 
-    @abstractmethod
     def get_leader(self) -> object:
         """Gets leader data
 
@@ -150,21 +169,50 @@ class Discovery(BlobStorage):
             self.log.error(exc)
             return None
 
-    @abstractmethod
-    def get_managers(self) -> None:
-        raise NotImplementedError()
+    def get_managers(self) -> list:
+        """Gets list of registered managers
 
-    @abstractmethod
+        Returns:
+            list: list registered IP's
+        """
+        try:
+            list_managers = []
+            data = self.list_objects(self.list_managers)
+            for k in data:
+                list_managers.append(
+                    k.get("name").replace(self.list_managers + "/", "")
+                )
+            return list_managers
+        except azure.core.exceptions.ResourceNotFoundError as exc:
+            self.log.error(exc)
+            return None
+
     def remove_lock(self) -> None:
-        raise NotImplementedError()
+        """Removes state lock from object storage"""
+        try:
+            self.del_object(self.lock_file)
+        except Exception as exc:
+            return
 
-    @abstractmethod
     def register(self, ip: str) -> None:
-        raise NotImplementedError()
+        """Register manager node as available manager to join
+
+        Args:
+            ip (str): IP of manager node
+        """
+        try:
+            self.put_object(f"{self.list_managers}/{ip}", ip)
+        except Exception as exc:
+            self.log.critical(exc)
+            return
 
 
 class DockerSwarm(Discovery):
-    """DockerSwarm singleton"""
+    """DockerSwarm implements Docker Client interface
+
+    Args:
+        Discovery (class): Discovery Class
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -192,11 +240,11 @@ class DockerSwarm(Discovery):
             return
 
     def join(self, token: str, address: str) -> None:
-        """_summary_
+        """Join node to Docker Swarm Cluster using Leader/Manager IP and token
 
         Args:
-            token (str): _description_
-            address (str): _description_
+            token (str): Docker Swarm join token
+            address (str): Docker Swarm Leader/Manager IP
         """
         try:
             self.log.info("Attempting to join node to Docker Swarm cluster")
@@ -212,10 +260,11 @@ class DockerSwarm(Discovery):
 
 
 class Manager(DockerSwarm):
-    """_summary_
+    """Manager class manages Docker Swarm Managers.
+    This class init cluster, join managers
 
     Args:
-        DockerSwarm (_type_): _description_
+        DockerSwarm (class): Base class that implements Docker Client
     """
 
     def __init__(self) -> None:
@@ -224,30 +273,70 @@ class Manager(DockerSwarm):
         self.ip = os.getenv("HOST_IP")
 
     def init(self) -> bool:
-        """_summary_
+        """Initialize Docker Swarm Cluster
 
-        Args:
-            manager_address (str): _description_
+        Returns:
+            bool: True if cluster initialized, False if already inited
         """
         try:
             if not self.state_exists():
                 self.set_lock(self.ip)
                 self.log.info("Attempting to init Docker Swarm Cluster")
-                self.docker_client.api.init_swarm()
+                self.docker_client.api.init_swarm(advertise_addr=self.ip)
                 token = self._get_token()
                 self.set_leader(self.ip, token)
                 return True
-            self.log.info("Docker Swarm Cluster already set, nothing to init")
             return False
         except docker.errors.APIError as exc:
             self.log.critical(exc)
+            self.remove_lock()
             return False
+
+    def check_if_member(self) -> bool:
+        """Checks if manager IP is part of cluster or leader
+
+        Returns:
+            bool: Returns True if exists and False when not
+        """
+        leader = self.get_leader()
+        for k, v in leader.items():
+            if self.ip in v:
+                self.log.info("Manager with IP %s is cluster leader", self.ip)
+                return True
+        members = self.get_managers()
+        self.log.debug("List of registered members: %s", members)
+        if self.ip in members:
+            self.log.info("Node %s already is part of cluster", self.ip)
+            return True
+        return False
 
     def update_state(self) -> None:
         raise NotImplementedError()
 
     def join_manager(self) -> None:
-        raise NotImplementedError()
+        """Sends request to join manager to existing Docker Cluster"""
+        leader = self.get_leader()
+        try:
+            if not leader:
+                self.log.error(
+                    "Failed to find leader data. Lock might be set on unexisting cluster"
+                )
+                return
+            self.log.info("Attempting to join cluster as manager")
+            self.docker_client.api.join_swarm([leader.get("ip")], leader.get("token"))
+            self.log.info("Joined Docker Swarm Cluster")
+            self.register(self.ip)
+            self.log.info("%s registered as Docker Swarm Cluster manager", self.ip)
+        except docker.errors.APIError as exc:
+            self.log.critical("Failed to join as manager to cluster")
+            self.log.critical(exc)
+            return None
+        except AttributeError as exc:
+            self.log.error(
+                "Docker Swarm Cluster is not inited, but lock file might be exists"
+            )
+            self.log.error(exc)
+            return None
 
     def _get_token(self) -> str:
         """Gets Docker Swarm Join token for manager
@@ -266,9 +355,6 @@ class Manager(DockerSwarm):
             self.log.critical(exc)
             return None
 
-    def _check_address(self) -> None:
-        raise NotImplementedError()
-
 
 class Worker(DockerSwarm):
     """
@@ -280,6 +366,6 @@ class Worker(DockerSwarm):
 
 if __name__ == "__main__":
     manager = Manager()
-    res = manager.init()
-    if not res:
-        managers = manager.get_leader()
+    is_member = manager.check_if_member()
+    if not manager.init() and not is_member:
+        manager.join_manager()
