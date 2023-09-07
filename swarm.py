@@ -28,8 +28,10 @@ class LogHandler(StreamHandler):
 
 
 class BlobStorage:
-    """BlobStorage class provides an interface to communicate with Azure to get,
-    put, delete blobs from Azure Blob Storage Container"""
+    """
+    BlobStorage class provides an interface to communicate with Azure to get,
+    put, delete blobs from Azure Blob Storage Container
+    """
 
     def __init__(self) -> None:
         # Azure Blob Storage related init
@@ -145,14 +147,15 @@ class Discovery(BlobStorage):
             return True
         return False
 
-    def set_leader(self, ip: str, token: str) -> None:
+    def set_leader(self, ip: str, manager_token: str, worker_token: str) -> None:
         """Sets leader data
 
         Args:
             ip (str): IP address
-            token (str): Manager join token
+            manager_token (str): Manager join token
+            worker_token (str): Worker join token
         """
-        data = {"ip": ip, "token": token}
+        data = {"ip": ip, "manager_token": manager_token, "worker_token": worker_token}
         self.put_object(self.leader_file, json.dumps(data))
 
     def get_leader(self) -> object:
@@ -283,14 +286,21 @@ class Manager(DockerSwarm):
                 self.set_lock(self.ip)
                 self.log.info("Attempting to init Docker Swarm Cluster")
                 self.docker_client.api.init_swarm(advertise_addr=self.ip)
-                token = self._get_token()
-                self.set_leader(self.ip, token)
-                return True
+                manager_token, worker_token = self._get_tokens()
+                self.set_leader(self.ip, manager_token, worker_token)
             return False
         except docker.errors.APIError as exc:
             self.log.critical(exc)
             self.remove_lock()
             return False
+
+    def check_if_leader_exists(self) -> bool:
+        """_summary_
+
+        Returns:
+            bool: _description_
+        """
+        return True if self.get_leader() else False
 
     def check_if_member(self) -> bool:
         """Checks if manager IP is part of cluster or leader
@@ -299,19 +309,17 @@ class Manager(DockerSwarm):
             bool: Returns True if exists and False when not
         """
         leader = self.get_leader()
-        for k, v in leader.items():
-            if self.ip in v:
-                self.log.info("Manager with IP %s is cluster leader", self.ip)
-                return True
+        if leader:
+            for k, v in leader.items():
+                if self.ip in v:
+                    self.log.info("Manager with IP %s is cluster leader", self.ip)
+                    return True
         members = self.get_managers()
         self.log.debug("List of registered members: %s", members)
         if self.ip in members:
             self.log.info("Node %s already is part of cluster", self.ip)
             return True
         return False
-
-    def update_state(self) -> None:
-        raise NotImplementedError()
 
     def join_manager(self) -> None:
         """Sends request to join manager to existing Docker Cluster"""
@@ -323,7 +331,9 @@ class Manager(DockerSwarm):
                 )
                 return
             self.log.info("Attempting to join cluster as manager")
-            self.docker_client.api.join_swarm([leader.get("ip")], leader.get("token"))
+            self.docker_client.api.join_swarm(
+                [leader.get("ip")], leader.get("manager_token")
+            )
             self.log.info("Joined Docker Swarm Cluster")
             self.register(self.ip)
             self.log.info("%s registered as Docker Swarm Cluster manager", self.ip)
@@ -338,18 +348,20 @@ class Manager(DockerSwarm):
             self.log.error(exc)
             return None
 
-    def _get_token(self) -> str:
+    def _get_tokens(self) -> (str, str):
         """Gets Docker Swarm Join token for manager
 
         Returns:
-            str: join token
+            str: manager join token
+            str: worker join token
         """
         res = None
         try:
             res = self.docker_client.api.inspect_swarm()
             manager_join_token = res.get("JoinTokens").get("Manager")
-            self.log.info("Got docker swarm join token for manager")
-            return manager_join_token
+            worker_join_token = res.get("JoinTokens").get("Worker")
+            self.log.info("Got docker swarm join tokens for managers and workers")
+            return manager_join_token, worker_join_token
         except docker.errors.APIError as exc:
             self.log.critical("Failed to get join token")
             self.log.critical(exc)
@@ -361,11 +373,56 @@ class Worker(DockerSwarm):
     Worker class to manage Docker Swarm Workers in cluster
     """
 
-    pass
+    def __init__(self) -> None:
+        super().__init__()
+        self.ip = os.getenv("HOST_IP")
+
+    def join_worker(self) -> None:
+        """Join Worker node to Docker Swarm Cluster"""
+        try:
+            leader = self.get_leader()
+            self.log.info(
+                "Attempting to join Worker %s to Docker \
+                          Swarm Cluster with leader %s",
+                self.ip,
+                leader.get("ip"),
+            )
+            self.docker_client.api.join_swarm(
+                [leader.get("ip")], leader.get("worker_token")
+            )
+        except docker.errors.APIError as exc:
+            self.log.critical("Worker %s failed to join Docker Swarm Cluster", self.ip)
+            self.log.critical(exc)
+            return
+
+
+def exception_factory(exception, exception_message):
+    """Function takes an exception class and an error message as arguments
+
+    Args:
+        exception (class): Exception Class
+        exception_message (str): Error Message to return
+
+    Returns:
+        class: Exception class
+    """
+    return exception(exception_message)
 
 
 if __name__ == "__main__":
-    manager = Manager()
-    is_member = manager.check_if_member()
-    if not manager.init() and not is_member:
-        manager.join_manager()
+    role = os.getenv("ROLE")
+    match role:
+        case "manager":
+            manager = Manager()
+            is_member = manager.check_if_member()
+            if manager.check_if_leader_exists() and not is_member:
+                manager.join_manager()
+            else:
+                manager.init()
+        case "worker":
+            worker = Worker()
+            worker.join_worker()
+        case default:
+            raise exception_factory(
+                ValueError, "Environment variable ROLE should be set"
+            )
