@@ -134,7 +134,7 @@ class Discovery(BlobStorage):
         Args:
             ip (str): _description_
         """
-        self.log.info(f"Set lock by {ip} request")
+        self.log.info("Set lock by %s request", ip)
         self.put_object(self.lock_file, ip)
 
     def state_exists(self) -> bool:
@@ -301,7 +301,7 @@ class Manager(DockerSwarm):
         Returns:
             bool: True if leader exists and False if not
         """
-        return True if self.get_leader() else False
+        return bool(self.get_leader())
 
     def check_if_member(self) -> bool:
         """Checks if manager IP is part of cluster or leader
@@ -328,7 +328,8 @@ class Manager(DockerSwarm):
         try:
             if not leader:
                 self.log.error(
-                    "Failed to find leader data. Lock might be set on unexisting cluster"
+                    "Failed to find leader data."
+                    + "Lock might be set on unexisting cluster"
                 )
                 return None
             self.log.info("Attempting to join cluster as manager")
@@ -338,6 +339,7 @@ class Manager(DockerSwarm):
             self.log.info("Joined Docker Swarm Cluster")
             self.register(self.ip)
             self.log.info("%s registered as Docker Swarm Cluster manager", self.ip)
+            return None
         except docker.errors.APIError as exc:
             self.log.critical("Failed to join as manager to cluster")
             self.log.critical(exc)
@@ -370,9 +372,7 @@ class Manager(DockerSwarm):
 
 
 class Worker(DockerSwarm):
-    """
-    Worker class to manage Docker Swarm Workers in cluster
-    """
+    """Worker class to manage Docker Swarm Workers in cluster"""
 
     def __init__(self) -> None:
         super().__init__()
