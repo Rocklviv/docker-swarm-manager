@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import time
 import docker
 import logging
 import urllib3
@@ -37,7 +38,6 @@ class BlobStorage:
         # Azure Blob Storage related init
         conn_string = os.getenv("AZURE_BLOB_CONNECTION_STRING")
         self.container_name = os.getenv("AZURE_BLOB_CONTAINER_NAME")
-        self.blob_name = os.getenv("AZURE_CONTAINER_BLOB_NAME")
         self.blob_svc_client = BlobServiceClient.from_connection_string(conn_string)
 
     def is_exists(self, name) -> bool:
@@ -194,7 +194,8 @@ class Discovery(BlobStorage):
         """Removes state lock from object storage"""
         try:
             self.del_object(self.lock_file)
-        except Exception as exc:
+        except azure.core.exceptions.HttpResponseError as exc:
+            self.log.critical(exc)
             return
 
     def register(self, ip: str) -> None:
@@ -205,7 +206,7 @@ class Discovery(BlobStorage):
         """
         try:
             self.put_object(f"{self.list_managers}/{ip}", ip)
-        except Exception as exc:
+        except azure.core.exceptions.HttpResponseError as exc:
             self.log.critical(exc)
             return
 
@@ -295,10 +296,10 @@ class Manager(DockerSwarm):
             return False
 
     def check_if_leader_exists(self) -> bool:
-        """_summary_
+        """Check if leader exists
 
         Returns:
-            bool: _description_
+            bool: True if leader exists and False if not
         """
         return True if self.get_leader() else False
 
@@ -310,7 +311,7 @@ class Manager(DockerSwarm):
         """
         leader = self.get_leader()
         if leader:
-            for k, v in leader.items():
+            for _, v in leader.items():
                 if self.ip in v:
                     self.log.info("Manager with IP %s is cluster leader", self.ip)
                     return True
@@ -329,7 +330,7 @@ class Manager(DockerSwarm):
                 self.log.error(
                     "Failed to find leader data. Lock might be set on unexisting cluster"
                 )
-                return
+                return None
             self.log.info("Attempting to join cluster as manager")
             self.docker_client.api.join_swarm(
                 [leader.get("ip")], leader.get("manager_token")
@@ -376,20 +377,28 @@ class Worker(DockerSwarm):
     def __init__(self) -> None:
         super().__init__()
         self.ip = os.getenv("HOST_IP")
+        self.retry = 0
 
     def join_worker(self) -> None:
         """Join Worker node to Docker Swarm Cluster"""
         try:
             leader = self.get_leader()
-            self.log.info(
-                "Attempting to join Worker %s to Docker \
-                          Swarm Cluster with leader %s",
-                self.ip,
-                leader.get("ip"),
-            )
-            self.docker_client.api.join_swarm(
-                [leader.get("ip")], leader.get("worker_token")
-            )
+
+            if leader and self.retry <= 0:
+                self.log.info(
+                    "Attempting to join Worker %s to Docker \
+                            Swarm Cluster with leader %s",
+                    self.ip,
+                    leader.get("ip"),
+                )
+                self.docker_client.api.join_swarm(
+                    [leader.get("ip")], leader.get("worker_token")
+                )
+            else:
+                self.retry += 1
+                self.log.info("No leader(s) were found. Retry in 30 seconds")
+                time.sleep(30)
+                self.join_worker()
         except docker.errors.APIError as exc:
             self.log.critical("Worker %s failed to join Docker Swarm Cluster", self.ip)
             self.log.critical(exc)
