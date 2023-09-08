@@ -1,5 +1,7 @@
 # Docker Swarm Cluster automation script
 
+[![DeepSource](https://app.deepsource.com/gh/Rocklviv/docker-swarm-manager.svg/?label=active+issues&show_trend=true&token=JULlUCXgAt7VBaEAew6Dj6Va)](https://app.deepsource.com/gh/Rocklviv/docker-swarm-manager/?ref=repository-badge)
+
 Docker Swarm Cluster automation - is Python based script that automates creation of Docker Swarm Cluster.
 Script provides a possibility to create Docker Swarm cluster and provides a mechanism to automatically add new nodes as managers and workers.
 Automation makes sure that Docker Swarm cluster is not inited twice, stores some sort of state lock and saves cluster information on Blob Storage.
