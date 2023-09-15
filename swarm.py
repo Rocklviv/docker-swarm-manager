@@ -420,18 +420,15 @@ def exception_factory(exception, exception_message):
 
 if __name__ == "__main__":
     role = os.getenv("ROLE")
-    match role:
-        case "manager":
-            manager = Manager()
-            is_member = manager.check_if_member()
-            if manager.check_if_leader_exists() and not is_member:
-                manager.join_manager()
-            else:
-                manager.init()
-        case "worker":
-            worker = Worker()
-            worker.join_worker()
-        case default:
-            raise exception_factory(
-                ValueError, "Environment variable ROLE should be set"
-            )
+    if role == "manager":
+        manager = Manager()
+        is_member = manager.check_if_member()
+        if manager.check_if_leader_exists() and not is_member:
+            manager.join_manager()
+        else:
+            manager.init()
+    elif role == "worker":
+        worker = Worker()
+        worker.join_worker()
+    else:
+        raise exception_factory(ValueError, "Environment variable ROLE should be set")
