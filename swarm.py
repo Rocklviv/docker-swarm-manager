@@ -384,7 +384,7 @@ class Worker(DockerSwarm):
         try:
             leader = self.get_leader()
 
-            if leader and self.retry <= 0:
+            if leader and self.retry <= 10:
                 self.log.info(
                     "Attempting to join Worker %s to Docker \
                             Swarm Cluster with leader %s",
