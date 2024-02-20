@@ -8,24 +8,7 @@ import urllib3
 import requests
 import azure.core.exceptions
 from azure.storage.blob import BlobServiceClient
-from logging import StreamHandler, Formatter
-
-
-class LogHandler(StreamHandler):
-    """LogHandler class manages log formatting and log output
-
-    Args:
-        StreamHandler (class): Class to set logs output
-    """
-
-    def __init__(self) -> None:
-        output_type = os.getenv("LOGGING_TYPE") or sys.stdout
-        StreamHandler.__init__(self, output_type)
-        output_format = "%(asctime)s [%(threadName)10s][%(module)10s][%(lineno)4s]\
-        [%(levelname)8s] %(message)s"
-        format_date = "%Y-%m-%dT%H:%M:%S%Z"
-        formatter = Formatter(output_format, format_date)
-        self.setFormatter(formatter)
+from core.logger import LogHandler
 
 
 class BlobStorage:
@@ -38,7 +21,10 @@ class BlobStorage:
         # Azure Blob Storage related init
         conn_string = os.getenv("AZURE_BLOB_CONNECTION_STRING")
         self.container_name = os.getenv("AZURE_BLOB_CONTAINER_NAME")
-        self.blob_svc_client = BlobServiceClient.from_connection_string(conn_string)
+        try:
+            self.blob_svc_client = BlobServiceClient.from_connection_string(conn_string)
+        except AttributeError as exc:
+            raise exc
 
     def is_exists(self, name) -> bool:
         """Checks if object exists in blob storage container
