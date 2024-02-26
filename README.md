@@ -31,5 +31,6 @@ Script requires next Envrionment variables:
 Make sure script is running in user-data so that any Autoscalling process will be handled in right way and nodes will be added to Docker Swarm Cluster.
 
 ## Versions
-
+- `0.1.2` - Fixed issue with retry mechanism for Docker Swarm Workers
+- `0.1.1` - Added support for Python 3.10
 - `0.1.0` - Initial release that handles Docker Swarm creation with locks, cluster info saved on Blob Storage and join mechanism for managers and workers
